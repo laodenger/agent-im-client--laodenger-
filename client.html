@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>AI 聊天界面</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: Arial, sans-serif;
+        }
+
+        body {
+            background: #f5f5f5;
+            max-width: 500px;
+            margin: 20px auto;
+            padding: 0 15px;
+        }
+
+        .tool-bar {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+            padding: 8px 12px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            flex-wrap: wrap;
+        }
+
+        .tool-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 13px;
+            color: #333;
+        }
+
+        .chat-container {
+            background: white;
+            border-radius: 12px;
+            height: 65vh;
+            padding: 15px;
+            overflow-y: auto;
+            margin-bottom: 10px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            position: relative;
+        }
+
+        .message {
+            margin-bottom: 12px;
+            max-width: 75%;
+            padding: 8px 12px;
+            border-radius: 15px;
+            white-space: pre-wrap;
+            line-height: 1.4;
+        }
+
+        .user {
+            background: #007bff;
+            color: white;
+            margin-left: auto;
+        }
+
+        .ai {
+            background: #e9e9eb;
+            color: black;
+        }
+
+        .ai strong {
+            font-weight: bold;
+            color: #222;
+        }
+
+        .thinking {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            color: #666;
+            font-style: normal;
+        }
+        .thinking-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #888;
+            animation: bounce 1.2s infinite ease-in-out;
+        }
+        .thinking-dot:nth-child(1) { animation-delay: -0.32s; }
+        .thinking-dot:nth-child(2) { animation-delay: -0.16s; }
+        @keyframes bounce {
+            0%, 80%, 100% { transform: scale(0); }
+            40% { transform: scale(1); }
+        }
+
+        .input-box {
+            display: flex;
+            gap: 8px;
+        }
+
+        input {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 20px;
+            outline: none;
+        }
+
+        button {
+            padding: 12px 16px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .session-bar {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+        }
+
+        .session {
+            padding: 6px 10px;
+            background: #eee;
+            border-radius: 15px;
+            cursor: pointer;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .session.active {
+            background: #007bff;
+            color: white;
+        }
+
+        .del-btn {
+            width: 14px;
+            height: 14px;
+            line-height: 14px;
+            text-align: center;
+            background: #ff4444;
+            color: white;
+            border-radius: 50%;
+            font-size: 10px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+<div class="session-bar" id="sessionBar"></div>
+
+<div class="tool-bar">
+    <div class="tool-item">
+        <input type="checkbox" id="tool1" value="search">
+        <label for="tool1">搜索资料</label>
+    </div>
+    <div class="tool-item">
+        <input type="checkbox" id="tool2" value="calculator">
+        <label for="tool2">计算器</label>
+    </div>
+    <div class="tool-item">
+        <input type="checkbox" id="tool3" value="python">
+        <label for="tool3">Python 代码执行</label>
+    </div>
+</div>
+
+<div class="chat-container" id="chatBox"></div>
+
+<div class="input-box">
+    <input id="msgInput" placeholder="输入消息..." onkeydown="if(event.key==='Enter')sendMsg()">
+    <button onclick="sendMsg()">发送</button>
+</div>
+
+<script>
+    let sessions = [];
+    let currentSessionIndex = 0;
+    let isGenerating = false;
+    let generatingSessionId = null; // 正在输出的会话ID
+
+    // 每个会话的实时状态
+    let sessionStates = {};
+
+    function initDefaultSession() {
+        if (sessions.length === 0) {
+            const id = generateUUID();
+            sessions.push({ id, title: "聊天 1", messages: [] });
+            sessionStates[id] = { thinking: null, aiMsg: null, fullText: "" };
+        }
+        renderSessions();
+        loadCurrentSession();
+    }
+
+    function generateUUID() {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    }
+
+    function newSession() {
+        const id = generateUUID();
+        sessions.push({ id, title: `聊天 ${sessions.length + 1}`, messages: [] });
+        sessionStates[id] = { thinking: null, aiMsg: null, fullText: "" };
+        currentSessionIndex = sessions.length - 1;
+        renderSessions();
+        loadCurrentSession();
+    }
+
+    function switchSession(index) {
+        currentSessionIndex = index;
+        renderSessions();
+        loadCurrentSession();
+    }
+
+    function deleteSession(index, e) {
+        e.stopPropagation();
+        if (sessions.length <= 1) return;
+        const id = sessions[index].id;
+        delete sessionStates[id];
+        sessions.splice(index, 1);
+        currentSessionIndex = Math.max(0, currentSessionIndex - 1);
+        renderSessions();
+        loadCurrentSession();
+    }
+
+    function renderSessions() {
+        let bar = document.getElementById("sessionBar");
+        bar.innerHTML = "";
+        sessions.forEach((s, i) => {
+            let cls = i === currentSessionIndex ? "session active" : "session";
+            bar.innerHTML += `
+                <div class="${cls}" onclick="switchSession(${i})">
+                    ${s.title}
+                    <span class="del-btn" onclick="deleteSession(${i}, event)">×</span>
+                </div>`;
+        });
+        bar.innerHTML += `<div class="session" onclick="newSession()">+ 新建</div>`;
+    }
+
+    function loadCurrentSession() {
+        let box = document.getElementById("chatBox");
+        box.innerHTML = "";
+        let current = sessions[currentSessionIndex];
+        let state = sessionStates[current.id];
+
+        current.messages.forEach(item => {
+            let div = document.createElement("div");
+            div.className = "message " + item.role;
+            div.innerHTML = parseMarkdown(item.content);
+            box.appendChild(div);
+        });
+
+        if (state.thinking && !state.aiMsg) {
+            box.appendChild(state.thinking);
+        }
+        if (state.aiMsg) {
+            box.appendChild(state.aiMsg);
+        }
+
+        box.scrollTop = box.scrollHeight;
+    }
+
+    function parseMarkdown(text) {
+        return text ? text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') : "";
+    }
+
+    function getSelectedTools() {
+        let tools = [];
+        if (document.getElementById("tool1").checked) tools.push("搜索资料");
+        if (document.getElementById("tool2").checked) tools.push("计算器");
+        if (document.getElementById("tool3").checked) tools.push("Python 代码执行");
+        return tools;
+    }
+
+    function updateButtonState() {
+        const btn = document.querySelector("button");
+        const input = document.getElementById("msgInput");
+        const current = sessions[currentSessionIndex];
+
+        if (isGenerating && current.id !== generatingSessionId) {
+            btn.disabled = true;
+            input.disabled = true;
+            btn.textContent = "其他聊天正在输出...";
+        } else {
+            btn.disabled = false;
+            input.disabled = false;
+            btn.textContent = "发送";
+        }
+    }
+
+    async function sendMsg() {
+        const input = document.getElementById("msgInput");
+        const text = input.value.trim();
+        const current = sessions[currentSessionIndex];
+
+        if (!text || isGenerating) return;
+
+        isGenerating = true;
+        generatingSessionId = current.id;
+        updateButtonState();
+
+        const tools = getSelectedTools();
+        input.value = "";
+
+        current.messages.push({ role: "user", content: text });
+        loadCurrentSession();
+
+        const box = document.getElementById("chatBox");
+        const state = sessionStates[current.id];
+
+        if (state.thinking) state.thinking.remove();
+        state.thinking = document.createElement("div");
+        state.thinking.className = "message ai thinking";
+        state.thinking.innerHTML = `思考中<span class="thinking-dot"></span><span class="thinking-dot"></span><span class="thinking-dot"></span>`;
+        box.appendChild(state.thinking);
+        box.scrollTop = box.scrollHeight;
+
+        state.aiMsg = document.createElement("div");
+        state.aiMsg.className = "message ai";
+        state.fullText = "";
+
+        try {
+            const res = await fetch("http://127.0.0.1:5000/api/stream", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ session_id: current.id, message: text, tools })
+            });
+
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+
+            if (state.thinking) state.thinking.remove();
+            state.thinking = null;
+            box.appendChild(state.aiMsg);
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                const chunk = decoder.decode(value);
+                const lines = chunk.split("\n");
+
+                for (const line of lines) {
+                    if (line.startsWith("data: ")) {
+                        try {
+                            const data = JSON.parse(line.replace("data: ", ""));
+                            state.fullText += data.text || "";
+                            state.aiMsg.innerHTML = parseMarkdown(state.fullText);
+                            if (sessions[currentSessionIndex].id === current.id) {
+                                box.scrollTop = box.scrollHeight;
+                            }
+                        } catch (e) {}
+                    }
+                }
+            }
+
+            if (state.fullText) {
+                current.messages.push({ role: "ai", content: state.fullText });
+            }
+
+        } catch (e) {
+            current.messages.push({ role: "ai", content: "⚠️ 请求失败" });
+        } finally {
+            state.thinking = null;
+            state.aiMsg = null;
+            state.fullText = "";
+            isGenerating = false;
+            generatingSessionId = null;
+            loadCurrentSession();
+            updateButtonState();
+        }
+    }
+
+    window.onload = initDefaultSession;
+    document.addEventListener("visibilitychange", () => {});
+</script>
+</body>
+</html>
